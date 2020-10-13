@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <title>Basic Server Setup</title>
+  <link rel="stylesheet"
+  href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.2/styles/default.min.css">
+  <style media="screen">
+    a {
+      border-bottom: 1px dotted #000;
+      color: #525252;
+      transition: border-bottom-color .25s;
+      text-decoration: none;
+    }
+  </style>
+</head>
+
+<body>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.2/highlight.min.js"></script>
+  <script charset="UTF-8"
+  src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/10.1.2/languages/go.min.js"></script>
+  <script>hljs.initHighlightingOnLoad();</script>
+
+  <h1>Basic Server Setup With Django, Gunicorn, and Nginx.</h1>
+  <strong>Key:</strong>
+  <ul>
+    <li><code>$ ...</code>  | Local terminal</li>
+    <li><code># ...</code>  | Remote VM terminal</li>
+    <li><code>#$ ...</code> | Operation mirrored on both local and remote terminal</li>
+  </ul>
+  <h2><a href="https://www.digitalocean.com/community/tutorials/initial-server-setup-with-ubuntu-18-04">Initial Server Setup</a></h2>
+
+  <a style="color: blue" href="https://www.digitalocean.com/community/tutorials/automating-initial-server-setup-with-ubuntu-18-04">
+  See here for steps on how to automate server setup.
+  </a></strong>
+  <p>Once you have a linux machine up and running (I used DigitalOcean as it was cheap [$5/month])</p>
+
+  <ol>
+    <!--   -->
+    <li><h3><a href="#">Spin up a Virtual Machine</a></h3>
+      I used a DigitalOcean Droplet running Ubuntu 18.04.
+    </li>
+
+    <!--   -->
+    <li><h3><a href="#">Initial VM Configuration for User</a></h3>
+
+      Obtain VM's IP address an SSH into root:
+      <pre><code class="lang-sh">
+  $ ssh root@your_server_ip
+      </code></pre>
+
+      Add a new user and grant them superuser privileges:
+      <pre><code class="lang-sh">
+  # adduser dustin
+  # usermod -aG sudo dustin
+      </code></pre>
+
+      Setup a basic firewall
+      <pre><code class="lang-sh">
+  # ufw app list
+  # ufw allow OpenSSH
+  # ufw enable
+      </code></pre>
+
+    <!--   -->
+    <li><h3><a href="https://www.digitalocean.com/community/tutorials/how-to-set-up-ssh-keys-on-ubuntu-1804">
+        Remote Connect to the VM via SSH</a>
+      </h3>
+
+      On you local machine, generate a 4096-bit RSA SSH key pair, which will
+      create a public (.pub) and private key pair with name <i>file_name_rsa</i>:
+      <pre><code class="lang-sh">
+  $ ssh-keygen -f ~/.ssh/file_name_rsa -t rsa -b 4096
+      </code></pre>
+
+      Add your SSH private key to the ssh-agent and store your passphrase in the keychain (Mac):
+      <pre><code class="lang-sh">
+  $ eval "$(ssh-agent -s)"  # start the agent pid
+  $ ssh-add -K ~/.ssh/file_name_rsa   # add it to the agent
+      </code></pre>
+
+      If on OS Sierra >= 10.12.2 add automatic key loading to SSH agent in
+      <code class="lang-sh">~/.ssh/config</code>:
+      <pre><code class="lang-sh">
+  $ Host *
+      AddKeysToAgent yes
+      UseKeychain yes
+      IdentityFile ~/.ssh/file_name_rsa
+      </code></pre>
+      Login to the VM using password access initially and copy over the public
+      SSH key on your local machine to an <code>authorized_keys</code> file
+      located at:
+      <pre><code class="lang-sh">
+  # /home/user/.ssh/authorized_keys
+      </code></pre>
+      Or do it all-in-one with the following command on your local machine:
+      <pre><code class="lang-sh">
+  $ cat ~/.ssh/file_name_rsa.pub | ssh username@remote_host "mkdir -p ~/.ssh && touch ~/.ssh/authorized_keys && chmod -R go= ~/.ssh && cat >> ~/.ssh/authorized_keys"
+      </code></pre>
+      (I assume that this will give the correct ownership of the authorized_keys file to the correct user)
+
+      <br><br> If the root has been used to set up the authroized key, we need to
+      ensure that the intended user has ownership of the contents:
+      <pre><code class="lang-sh">
+  # rsync --archive --chown=dustin:dustin ~/.ssh /home/dustin
+      </code></pre>
+
+      SSH into the remote as the created user:
+      <pre><code class="lang-sh">
+  $ ssh dustin@ip_address
+      </code></pre>
+
+      Install python and pip:
+      <pre><code class=lang-sh>
+  # sudo apt-get update
+  # sudo apt-get install python3-pip python3-dev
+      </code></pre>
+    </li>
+
+
+    <!--   -->
+    <li><h3><a href="#">Setup git repository</a></h3></li>
+    (Note, to setup git profiles on a local PC for github and bitbucket)
+    <a href="https://gist.github.com/rosswd/e1afd2b0b0d515517eac">follow this link</a>.
+
+    <p>
+      Once you have a Github account, set the repo up on your local PC:
+      <ol>
+        <li>Add your local PC SSH key to your git account</li>
+        <li>Create a repo for the new project in Github</li>
+        <li>Clone it to your local PC using the Github SSH link
+          <pre><code class="lang-sh">
+  $ git clone git@github.com:DustinFischer/test-repo.git
+          </code></pre>
+        </li>
+        <pre><code class="lang-sh">
+  $ git clone git@github.com:DustinFischer/test-repo-name.git
+        </code></pre>
+        <li>Setup the remote repo
+          <pre><code class="lang-sh">
+  $ git branch -M main
+  $ git branch develop (use this for dev server)
+  $ git remote add origin git@github.com:DustinFischer/test-repo-name.git
+          </code></pre>
+        </li>
+        <li>Set the upstream for the first push:
+          <pre><code class="lang-sh">
+  $ git push -u origin main
+          </code></pre>
+          Thereafter:
+          <pre><code class="lang-sh">
+  $ git push origin main
+  #$ git push origin develop
+          </code></pre>
+        </li>
+        <li>Add the remote machine's public key to the repository's project keys
+          (if github)</li>
+      </ol>
+    </p>
+    <p> Then, set the read-only repo up on your VM instance:
+      <ol>
+        <li>Create an SSH key pair on your remote machine as preceeding and link
+            it the project repo's <i>deploy keys</i> (don't allow write access unless you want to)
+        </li>
+        <li><code>cd</code> into intended directory</li>
+        <li>Clone the desired branch to the remote machine:
+          <pre><code class="lang-sh">
+  # git clone -b &ltbranch_name&gt --single-branch git@github.com:DustinFischer/test-repo-name.git
+          </code></pre>
+        </li>
+        <li>Thereafter <code>git pull</code> will work to update the code.</li>
+      </ol>
+    </p>
+
+    <!--   -->
+    <li><a href="#"><h3>Set up the Django project locally</h3></a>
+      Once the boilerplate Django stuff is set up and you are happy with the
+      project structure, you should add a <code>setup.py</code> installation
+      file. Assuming that you have placed the project contents inside a
+      <code>src/</code> directory within the project, the <code>setup.py</code>
+      will look something like this:
+      <pre><code class="lang-python">
+  from setuptools import setup, find_packages
+
+  setup(
+      name='dummy-django-project',
+      description='',
+      author='Dustin Fisher',
+      author_email='dustin@gmail.com',
+      url='http://dustinfischer.com/',
+      use_scm_version=True,  # Version from hg or git
+      setup_requires=['setuptools_scm'],
+      package_dir={'': 'src'},
+      packages=find_packages('src'),
+      include_package_data=True,
+      zip_safe=False,
+  )
+      </code></pre>
+      <p><strong><u>On both your local and remote machines</u></strong></p>
+
+      Create your virtual environment and activate it:
+      <pre><code class="lang-python">
+#$ pip install virutalenv
+#$ virtualenv venv
+#$ . venv/bin/activate
+      </code></pre>
+      Install your project requirements from a requirements file:
+      <pre><code class="lang-python">
+#$ pip install -r ./requirements/base.txt
+      </code></pre>
+      Remember to collect the static files:
+      <pre><code class="lang-python">
+#$ ./manage.py collectstatic
+# OR
+#$ django-admin collectstatic  # if DJANGO_SETINGS_MODULE="project.settings" is set in the env variables
+      </code></pre>
+      Install the project from the <code>setup.py</code> file:
+      <pre><code class="lang-python">
+#$ pip install -e .  # In development mode
+# OR
+#$ pip install .   # In production mode
+      </code></pre>
+    </li>
+
+    <!--  -->
+    <li><a href="#"><h3>Set up the Project Database</h3></a>
+
+    Install Postgresql (on the remote):
+    <pre><code class="lang-sh">
+# sudo apt-get libpq-dev postgresql postgresql-contrib
+    </code></pre>
+
+    Install the PostgreSQL adapter from Django <code>psycopg2</code>:
+    <pre><code class="lang-sh">
+#$ pip install psycopg2-binary
+    </code></pre>
+
+    Create the database for the default <code>postgres</code> user:
+    <pre><code class="lang-sh">
+#$ export PGHOST="db"
+#$ export DB_USER="posgres"
+#$ export DB_PASSWORD="postgres"
+#$ createdb ${PGHOST} -U ${DB_USER} ${DB_NAME}
+    </code></pre>
+
+    Configure the database in Django <code>settings.py</code>
+    <pre><code class="lang-python">
+# ... settings.py
+DATABASES = {
+'default': {
+    'ENGINE': 'django.db.backends.postgresql',
+    'NAME': os.getenv('DB_NAME', 'dummy_django_project'),
+    'HOST': os.getenv('DB_HOST', ''),
+    'PORT': os.getenv('DB_PORT', '5432'),
+    'USER': os.getenv('DB_USER', ''),
+    'PASSWORD': os.getenv('DB_PASSWORD', ''),
+  }
+}
+    </code></pre>
+
+    And finally migrate the project to the database and load fixtures if any:
+    <pre><code class="lang-sh">
+#$ django-admin migrate
+    </code></pre>
+    </li>
+
+
+    <!--  -->
+    <li><a href="https://www.digitalocean.com/community/tutorials/how-to-set-up-django-with-postgres-nginx-and-gunicorn-on-ubuntu-16-04#troubleshooting-nginx-and-gunicorn">
+      <h3>Setup the gunicorn server</h3></a></li>
+
+     Gunicorn is the production mode WSGI server.
+     We use this in conjunction with <code>whitenoise</code> in Django to serve
+     static files in production mode.
+     <pre><code class="lang-sh">
+#$ pip install gunicorn
+#$ pip install whitenoise
+     </code></pre>
+
+     Then, instead of initializing the server using <code>runserver</code>,
+     we start the Gunicorn server on <code>0.0.0.0:800</code>:
+     <pre><code class="lang-sh">
+#$ export WSGI_MODULE="${WSGI_MODULE:-"project.wsgi"}"
+#$ export HTTP_HOST="0.0.0.0"   # This is necessary to allow traffic between PC's
+#$ export HTTP_HOST="${HTTP_HOST:-"127.0.0.1"}"
+
+#$ exec gunicorn ${WSGI_MODULE} -b "${HTTP_HOST}:8000" --env WHITENOISE=1 --threads 2
+     </code></pre>
+
+      At this point, our remote is unable to serve this yet, as the firewall
+      needs to be setup to listen on port 8000. This is not necessary unless
+      required for some reason, otherwise it will be handled by Nginx as described later.
+      <p>
+        If you are setup for traffic on port 8000, you would access the page in your
+        browser at the location <code>IP_address:8000</code>
+      </p>
+
+      <p>
+        <strong>Note:</strong> To kill all gunicorn daemons.
+        <pre><code class="lang-sh">
+ #$ pkill gunicorn
+        </code></pre>
+        Or to kill on a specific port try <a href="https://www.thetopsites.net/article/51854091.shtml">this script</a>
+        <pre><code class="lang-sh">
+ #!/bin/bash
+ Port=8000
+ pid=`ps ax | grep gunicorn | grep $Port | awk '{split($0,a," "); print a[1]}' | head -n 1`
+ if [ -z "$pid" ]; then
+   echo "no gunicorn deamon on port $Port"
+ else
+   kill $pid
+   echo "killed gunicorn deamon on port $Port"
+ fi
+        </code></pre>
+      You can list all gunicorn processes on a specific port with:
+      <pre><code class="lang-sh">
+#$ ps ax | grep gunicorn | grep $Port
+      </code></pre>
+      </p>
+
+     <!--  -->
+     <li><a href="https://www.digitalocean.com/community/tutorials/how-to-set-up-django-with-postgres-nginx-and-gunicorn-on-ubuntu-16-04#troubleshooting-nginx-and-gunicorn">
+       <h3>Setup Nginx to reverse proxy to the Gunicorn server</h3></a>
+     </li>
+
+     Install Nginx on your remote:
+     <pre><code class="lang-sh">
+ # sudo apt-get install nginx
+     </code></pre>
+
+     <p><strong>Setup for HTTP traffic</strong></p>
+
+     Open a new server block in Nginx's <code>sires-available</code> directory:
+     <pre><code class="lang-sh">
+ # sudo vim /etc/nginx/sites-available/project_name
+     </code></pre>
+
+     The basic server block will look soething like this for HTTP traffic routing:
+     <pre><code class="lang-sh">
+ server {
+    listen 80;
+    server_name server_domain_or_IP [...more];
+    location = /favicon.ico { access_log off; log_not_found off; }
+    location /static/ {
+        alias /path/to/static_root/
+    }
+    location / {
+        proxy_pass 0.0.0.0:8000;
+    }
+ }
+     </code></pre>
+
+     Link the server block to <code>sites-enabled</code>:
+     <pre><code class="lang-sh">
+ # sudo ln -s /etc/nginx/sites-available/project_name /etc/nginx/sites-enabled
+     </code></pre>
+
+     Check for any syntax errors:
+     <pre><code class="lang-sh">
+ # sudo nginx -t
+     </code></pre>
+
+     Configure the Firewall for Nginx:
+     <pre><code class="lang-sh">
+ # sudo ufw allow 'Nginx Full'
+     </code></pre>
+
+     Finally, restart the Nginx daemon:
+     <pre><code class="lang-sh">
+ # sudo systemctl restart nginx
+     </code></pre>
+
+    <p style="color: green">
+      <strong>
+      At this point, if gunicorn is running correctly, and the Ngnx server file is
+      correctly configured, then you should be able to access your site directly via
+      its <code>IP Address</code>, or if you have a <code>domain</code> setup with a
+      DNS A-record linked to the IP address, then you can access it directly with
+      the domain name, assuming it is set up as so in the server block accordingly.
+      </strong>
+    </p>
+
+    <!--  -->
+    <li><a href="https://www.digitalocean.com/community/tutorials/how-to-set-up-a-scalable-django-app-with-digitalocean-managed-databases-and-spaces">
+      <h3>Secure Nginx with encrypted HTTPS using SSL certification</h3></a>
+
+      To use Let’s Encrypt to obtain an SSL certificate, first install the Certbot software on your server:
+      <pre><code class="lang-sh">
+  # sudo add-apt-repository ppa:certbot/certbot
+  # sudo apt-get update
+  # sudo apt-get install python-certbot-nginx
+      </code></pre>
+
+      Restrict the firewal to HTTPS traffic:
+      <pre><code class="lang-sh">
+  # sudo ufw delete allow 'Nginx HTTP'
+      </code></pre>
+
+      Obtain an SSL Certificate for specified domains.
+      <pre><code class="lang-sh">
+  # sudo certbot --nginx -d example.com -d www.example.com
+      </code></pre>
+      Note that this will modify the existing server block file(s) containing
+      the specified domains in <code>server_name</code> field of sites which are
+      included in <code>site-available</code>
+
+      <p>If you want to, backup the existing <code>/etc/nginx/sites-available/project_name</code> file.</p>
+
+      We now want to refactor the server block file to redirect any HTTP
+      requests on port <code>80</code> to HTTPS port <code>443</code>.
+      This is achieved by returning a 301 reponse header to an https request.
+
+      <p>The refactored file will now look something like this:</p>
+      <pre><code class="lang-sh">
+# ... in /etc/nginx/sites-available/project_name
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    return 301 https://dustinfischer.com$request_uri;
+}
+
+server {
+    listen [::]:443 ssl ipv6only=on;
+    listen 443 ssl;
+    server_name dustinfischer.com www.dustinfischer.com;
+
+    # Lets encrypt paramters
+    ssl_certificate /etc/letsencrypt/live/dustinfischer.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/dustinfischer.com/privkey.pem;
+    include /etc/letsencrypt/options-ssl-nginx.conf;
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem;
+
+    location = /favicon.ico { access_log off; log_not_found off; }
+
+    location / {
+        proxy_pass http://0.0.0.0:8000;
+        proxy_redirect off;
+
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
+      </code></pre>
+      <ul>
+        <li>The first block catches all HTTP requests and  redirects them HTTPS</li>
+        <li>
+          The second block is our reverse proxy on HTTPS requests.
+          This adds SSL parameters, and also adds security response headers related to HTTPS
+        </li>
+      </ul>
+
+      And restart Nginx:
+      <pre><code class="lang-sh">
+  # sudo systemctl restart nginx
+      </code></pre>
+
+      Lastly, we update our Django <code>settings.py</code> to tell Django that
+      you have enabled HTTPS on your server, and instruct it to use “secure” cookies:
+      <pre><code class="lang-python">
+  # ... settings.py
+  HTTPS = BASE_URL.startswith('https')
+  # -----------------------------------------------------------------------------
+  # SSL HTTPS SETTINGS
+  # -----------------------------------------------------------------------------
+  # SHOULD REALLY BE FACTORED OUT INTO EACH AS ENVIRONMENT VARIABLE DECOUPLING
+  if HTTPS:
+      SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+      SECURE_SSL_REDIRECT = True
+      SESSION_COOKIE_SECURE = True
+      CSRF_COOKIE_SECURE = True
+      </code></pre>
+    </li>
+
+    <!--  -->
+    <li><a href="#"><h3>A VERY Simple Server Startup Script</h3></a>
+      The following script assumes that the database is correctly setup and migrated,
+      and all necessary dependencies are installed.
+      <p>This is really just a simple collectstatic and gunicorn initiator:</p>
+      <pre><code class="lang-sh">
+  #!/usr/bin/env bash
+
+  set -e  # Exit when any commands fail
+
+  export DEBUG=${DEBUG:-0}  # DEBUG=False
+  export UPDATE=${UPDATE:-1}  # migrate DB, update packages by default
+  export WSGI_MODULE="${WSGI_MODULE:-"project.wsgi"}"
+
+  export HTTP_HOST="0.0.0.0"
+  export HTTP_HOST="${HTTP_HOST:-"127.0.0.1"}"
+  export WHITENOISE=${WHITENOISE:-1}
+
+  export DJANGO_SETTINGS_MODULE="${DJANGO_SETTINGS_MODULE:-"project.settings"}"
+
+  export py=python3
+
+  # Set base path of run scripts
+  RUNDIR=$( cd "$(dirname "${BASH_SOURCE[0]}")" ; pwd -P )
+
+  # collectstatic
+  # Only needed for "run/server" or "run/build" (DEBUG=0)
+  if [[ "${DEBUG}" == "0" ]]; then
+      echo "Collect static files..."
+      if [[ "${VERBOSE}" == "1" ]]; then
+          django-admin collectstatic --noinput
+      else
+          django-admin collectstatic --noinput --verbosity 0
+      fi
+  fi
+
+  # Environment
+  echo "DEBUG: ${DEBUG}"
+  echo "HTTP_HOST: ${HTTP_HOST}"
+
+  # Start server
+  # ensure gunicorn is installed
+  if ! ${py} -c "import gunicorn" &> /dev/null; then
+      pip install gunicorn
+  fi
+
+  printf "Start server...\n\n"
+  exec gunicorn ${WSGI_MODULE} -b "${HTTP_HOST}:8000" --env WHITENOISE=1 --threads 2
+      </code></pre>
+
+    </li>
+  </ol>
+</body>
+</html>
